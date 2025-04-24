@@ -5,91 +5,86 @@ import ta
 import datetime
 
 # Page Configuration
-st.set_page_config(page_title="Signal LuxAlgo Like", layout="wide")
-st.title("🔍 Scanner de Signaux Acheteur/Vendeur (Type LuxAlgo) - Journalier")
+st.set_page_config(page_title="Suivi de Portefeuille Crypto", layout="wide")
+st.title("📈 Suivi de Portefeuille Crypto")
 
-# Top 5 en démo pour tester rapidement
-TOP50_STOCKS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
-TOP50_CRYPTOS = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD"]
+# Liste des cryptos dans ton portefeuille
+PORTFOLIO = [
+    {"crypto": "BTC-USD", "name": "Bitcoin"},
+    {"crypto": "ETH-USD", "name": "Ethereum"},
+    {"crypto": "BNB-USD", "name": "Binance Coin"},
+    {"crypto": "SOL-USD", "name": "Solana"},
+    {"crypto": "XRP-USD", "name": "Ripple"},
+]
 
+# Initialiser le dataframe qui contiendra le prix initial et les prix quotidiens
 @st.cache_data
-def fetch_data(ticker):
+def get_crypto_data(ticker):
     try:
-        # Récupération des données sur 3 mois avec intervalle de 1 jour
-        df = yf.download(ticker, period="3mo", interval="1d")
+        # Récupérer les données historiques avec un intervalle de 1 jour
+        df = yf.download(ticker, period="30d", interval="1d")
         
-        # Affichage des 5 premières lignes pour voir les données
+        # Vérifier si les données sont disponibles
         if df.empty:
-            return None, f"❌ Aucune donnée disponible pour {ticker}"
+            return None, "❌ Aucune donnée pour cette crypto"
         
-        st.write(f"📊 Données de {ticker} :")
-        st.write(df.head())  # Afficher les 5 premières lignes pour vérifier les données
-
-        # Vérification si la colonne 'Close' existe
-        if "Close" not in df.columns:
-            return None, "Colonne 'Close' manquante dans les données"
+        # Ajouter la colonne RSI en utilisant ta librairie ta (RSI sur Weekly)
+        df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
         
-        # Conversion des données 'Close' en numérique
-        df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-        df.dropna(inplace=True)  # Suppression des valeurs NaN
-
-        # Vérifier si les données sont encore présentes après nettoyage
-        if df.empty:
-            return None, "Toutes les valeurs sont NaN après nettoyage"
-        
+        # Retourner les données et le statut
         return df, "OK"
     
     except Exception as e:
-        return None, f"❌ Erreur lors de la récupération des données : {str(e)}"
+        return None, f"❌ Erreur de récupération des données : {str(e)}"
 
+# Fonction pour déterminer le signal d'achat/vente basé sur le RSI
 def get_signal(df):
     try:
-        close = df["Close"]
+        rsi_weekly = df["RSI"].iloc[-1]  # RSI du dernier jour disponible
         
-        # Calcul des indicateurs EMA
-        ema_fast = ta.trend.ema_indicator(close=close, window=9)
-        ema_slow = ta.trend.ema_indicator(close=close, window=21)
-        
-        df["EMA_fast"] = ema_fast
-        df["EMA_slow"] = ema_slow
-        
-        # Assurer qu'il y a au moins deux points pour le croisement
-        if len(df) < 2:
-            return "⚠️ Données insuffisantes"
-
-        # Détection du croisement EMA
-        if df["EMA_fast"].iloc[-2] < df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] > df["EMA_slow"].iloc[-1]:
-            return "🟢 Signal Acheteur"
-        elif df["EMA_fast"].iloc[-2] > df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] < df["EMA_slow"].iloc[-1]:
-            return "🔴 Signal Vendeur"
+        # Si le RSI est supérieur à 70, signal de vente
+        if rsi_weekly > 70:
+            return "🔴 Vendre"
         else:
-            return "⚪️ Aucun Signal"
-    
+            return "🟢 Conserver"
     except Exception as e:
-        return f"❌ Erreur calcul du signal : {str(e)}"
+        return f"❌ Erreur calcul RSI : {str(e)}"
 
-def afficher_signaux(tickers, titre):
-    st.subheader(titre)
+# Fonction pour afficher les résultats dans Streamlit
+def afficher_portefeuille(portfolio):
     resultats = []
-    
-    for ticker in tickers:
-        # Récupérer les données
-        df, status = fetch_data(ticker)
+
+    for item in portfolio:
+        ticker = item["crypto"]
+        name = item["name"]
         
-        # Si les données sont disponibles, on calcule le signal
+        # Récupérer les données de la crypto
+        df, status = get_crypto_data(ticker)
+        
+        # Si les données sont disponibles
         if df is None:
-            signal = f"❌ {status}"
+            resultats.append({"Nom": name, "Statut": status})
         else:
+            # Fixer le prix initial (prix du jour)
+            initial_price = df["Close"].iloc[0]
+            today_price = df["Close"].iloc[-1]
+            
+            # Déterminer le signal d'achat/vente
             signal = get_signal(df)
-        
-        resultats.append({"Ticker": ticker, "Signal": signal})
+            
+            resultats.append({
+                "Nom": name,
+                "Prix initial": initial_price,
+                "Prix actuel": today_price,
+                "Signal": signal,
+            })
     
-    # Affichage des résultats sous forme de tableau
+    # Affichage sous forme de tableau dans Streamlit
     st.dataframe(pd.DataFrame(resultats), use_container_width=True)
 
-# Exécution des affichages pour les actions et les cryptos
-afficher_signaux(TOP50_STOCKS, "📈 Top 5 Actions")
-afficher_signaux(TOP50_CRYPTOS, "💰 Top 5 Cryptos")
+# Exécution de l'affichage des cryptos du portefeuille
+afficher_portefeuille(PORTFOLIO)
+
 
 
 
