@@ -2,38 +2,53 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import ta
-import cryptocompare
+from ta.trend import EMAIndicator
 
-st.set_page_config(page_title="Scanner Signal Acheteur/Vendeur", layout="wide")
+# ------------------------------
+# Configuration de l'app
+# ------------------------------
+st.set_page_config(page_title="Scanner Acheteur/Vendeur", layout="wide")
 
-st.title("📊 Scanner LuxAlgo Style - Top 50 Actions & Cryptos (Journalier)")
+st.markdown("""
+    <style>
+        .main { background-color: #f7f9fa; }
+        h1, h2, h3 { color: #083759; }
+        .st-bw { background-color: white; padding: 1em; border-radius: 10px; box-shadow: 0px 2px 6px rgba(0,0,0,0.05); }
+    </style>
+""", unsafe_allow_html=True)
 
-# === FONCTIONS ===
-@st.cache_data
-def get_stock_data(ticker):
+st.title("Scanner LuxAlgo-Like : Signaux Acheteur/Vendeur (Daily)")
+
+# ------------------------------
+# Listes TOP 50 actions & cryptos (à adapter dynamiquement si besoin)
+# ------------------------------
+TOP50_STOCKS = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "BRK-B", "LLY", "JPM"]  # raccourci ici
+TOP50_CRYPTOS = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "DOT-USD", "LINK-USD"]
+
+# ------------------------------
+# Fonction de téléchargement des données
+# ------------------------------
+def get_data(ticker):
     try:
         df = yf.download(ticker, period="3mo", interval="1d")
-        df = df[["Close"]].dropna()
+        df.dropna(inplace=True)
         return df
     except:
         return None
 
-@st.cache_data
-def get_crypto_data(symbol):
-    try:
-        hist = cryptocompare.get_historical_price_day(symbol, currency='USD', limit=90)
-        df = pd.DataFrame(hist)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df.set_index("time", inplace=True)
-        df.rename(columns={"close": "Close"}, inplace=True)
-        df = df[["Close"]].dropna()
-        return df
-    except:
-        return None
-
+# ------------------------------
+# Fonction de signal type LuxAlgo (cross EMA 9 / 21)
+# ------------------------------
 def get_signal(df):
-    df["EMA_fast"] = ta.trend.ema_indicator(df["Close"].astype(float), window=9)
-    df["EMA_slow"] = ta.trend.ema_indicator(df["Close"].astype(float), window=21)
+    close = df["Close"].astype(float)
+    ema_fast = EMAIndicator(close=close, window=9).ema_indicator()
+    ema_slow = EMAIndicator(close=close, window=21).ema_indicator()
+
+    df["EMA_fast"] = ema_fast
+    df["EMA_slow"] = ema_slow
+
+    if len(df) < 2 or df["EMA_fast"].isna().sum() > 0 or df["EMA_slow"].isna().sum() > 0:
+        return "❓ Données insuffisantes"
 
     last_fast = df["EMA_fast"].iloc[-1]
     last_slow = df["EMA_slow"].iloc[-1]
@@ -47,44 +62,33 @@ def get_signal(df):
     else:
         return "⚪️ Neutre"
 
-# === TICKERS ===
-TOP_50_ACTIONS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "JNJ", "JPM",
-    "V", "UNH", "MA", "PG", "HD", "XOM", "PFE", "BAC", "VZ", "ADBE",
-    "KO", "NFLX", "T", "WMT", "PEP", "MRK", "CRM", "CSCO", "ABT", "TMO",
-    "NKE", "CVX", "ORCL", "ACN", "AVGO", "MCD", "LLY", "AMD", "INTC", "LIN",
-    "QCOM", "UPS", "COST", "PM", "TXN", "HON", "MS", "GS", "BLK", "BMY"
-]
+# ------------------------------
+# Affichage des résultats
+# ------------------------------
 
-TOP_50_CRYPTOS = [
-    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "DOT", "TRX",
-    "LINK", "MATIC", "TON", "UNI", "BCH", "XLM", "LTC", "APT", "INJ", "NEAR",
-    "ARB", "ETC", "FIL", "HBAR", "ICP", "VET", "EGLD", "FTM", "RUNE", "MKR",
-    "AAVE", "SAND", "AXS", "FLOW", "THETA", "ZIL", "GRT", "CRV", "KAVA", "ENJ",
-    "BAT", "XEC", "1INCH", "COMP", "DYDX", "IMX", "LDO", "WOO", "YFI", "ZRX"
-]
+def afficher_resultats(tickers, label):
+    st.subheader(label)
+    results = []
+    for ticker in tickers:
+        df = get_data(ticker)
+        if df is not None:
+            signal = get_signal(df)
+            results.append({"Ticker": ticker, "Signal": signal})
 
-# === ANALYSE ===
-st.subheader("🔍 Résultats des signaux journaliers")
+    df_results = pd.DataFrame(results)
+    st.dataframe(df_results, use_container_width=True)
 
-results = []
+# ------------------------------
+# Lancement
+# ------------------------------
+col1, col2 = st.columns(2)
 
-for ticker in TOP_50_ACTIONS:
-    df = get_stock_data(ticker)
-    if df is not None and len(df) > 30:
-        signal = get_signal(df)
-        results.append({"Nom": ticker, "Catégorie": "Action", "Signal": signal})
+with col1:
+    afficher_resultats(TOP50_STOCKS, "Top 50 Actions")
 
-for crypto in TOP_50_CRYPTOS:
-    df = get_crypto_data(crypto)
-    if df is not None and len(df) > 30:
-        signal = get_signal(df)
-        results.append({"Nom": crypto, "Catégorie": "Crypto", "Signal": signal})
+with col2:
+    afficher_resultats(TOP50_CRYPTOS, "Top 50 Cryptos")
 
-df_result = pd.DataFrame(results)
-df_result = df_result.sort_values(by="Signal", ascending=False)
-
-st.dataframe(df_result, use_container_width=True)
 
 
 
