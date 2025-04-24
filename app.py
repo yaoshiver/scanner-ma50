@@ -3,8 +3,9 @@ import yfinance as yf
 import pandas as pd
 import ta
 import cryptocompare
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Scanner MA50", layout="wide")
+st.set_page_config(page_title="Scanner MA50 Multi-Timeframe", layout="wide")
 
 st.markdown("""
     <style>
@@ -14,51 +15,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Scanner Technique : 🔍 MA50")
+st.title("🔍 Scanner MA50 (4H / Daily / Weekly)")
 
-@st.cache_data
-def get_stock_data(ticker):
-    try:
-        df = yf.download(ticker.strip(), period="3mo", interval="1d")
-        df.dropna(inplace=True)
-        return df
-    except Exception as e:
-        return None
-
-@st.cache_data
-def get_crypto_data(symbol):
-    try:
-        hist = cryptocompare.get_historical_price_day(symbol.strip(), currency='USD', limit=90)
-        df = pd.DataFrame(hist)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df.set_index("time", inplace=True)
-        df.rename(columns={"close": "Close"}, inplace=True)
-        df.dropna(inplace=True)
-        return df
-    except Exception as e:
-        return None
-
-def check_above_ma50(df):
-    if "Close" not in df.columns or len(df) < 60:
-        return False
-    try:
-        df["MA50"] = ta.trend.SMAIndicator(close=df["Close"], window=50).sma_indicator()
-        return df["Close"].iloc[-1] > df["MA50"].iloc[-1]
-    except Exception as e:
-        return False
-
-def process_ticker(ticker, is_crypto=False):
-    df = get_crypto_data(ticker) if is_crypto else get_stock_data(ticker)
-    if df is None:
-        return None
-    result = {
-        "Ticker": ticker,
-        "Type": "Crypto" if is_crypto else "Action",
-        "Au-dessus MA50": "✅" if check_above_ma50(df) else "❌"
-    }
-    return result
-
-# 50 principales actions US (exemples)
+# Définir les tickers
 TOP_50_ACTIONS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "BRK-B", "JPM", "JNJ",
     "V", "PG", "UNH", "HD", "MA", "PFE", "ABBV", "XOM", "BAC", "DIS",
@@ -67,7 +26,6 @@ TOP_50_ACTIONS = [
     "AVGO", "COST", "TXN", "NEE", "UPS", "MS", "PM", "HON", "IBM", "UNP"
 ]
 
-# 50 principales cryptos (symboles)
 TOP_50_CRYPTOS = [
     "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "TRX",
     "LINK", "LTC", "MATIC", "XLM", "ATOM", "ETC", "FIL", "APT", "ARB", "IMX",
@@ -76,29 +34,79 @@ TOP_50_CRYPTOS = [
     "ZIL", "ENJ", "BCH", "XMR", "CRO", "SAND", "THETA", "AXS", "FLOW", "1INCH"
 ]
 
-with st.spinner("🔎 Analyse en cours..."):
+@st.cache_data
+def get_data_yfinance(ticker, period="3mo", interval="1d"):
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        df.dropna(inplace=True)
+        return df
+    except:
+        return None
+
+@st.cache_data
+def get_crypto_data(symbol):
+    try:
+        hist = cryptocompare.get_historical_price_day(symbol, currency='USD', limit=90)
+        df = pd.DataFrame(hist)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df.set_index("time", inplace=True)
+        df.rename(columns={"close": "Close"}, inplace=True)
+        df.dropna(inplace=True)
+        return df
+    except:
+        return None
+
+def check_ma50_condition(df):
+    if "Close" not in df.columns or len(df) < 60:
+        return False
+    try:
+        df["MA50"] = ta.trend.SMAIndicator(close=df["Close"], window=50).sma_indicator()
+        return df["Close"].iloc[-1] > df["MA50"].iloc[-1]
+    except:
+        return False
+
+def process_ticker_multi_tf(ticker, is_crypto=False):
+    timeframes = {
+        "4H": ("7d", "1h"),      # environ 4H via 1H interval
+        "Daily": ("3mo", "1d"),
+        "Weekly": ("2y", "1wk")
+    }
+
+    result = {
+        "Ticker": ticker,
+        "Type": "Crypto" if is_crypto else "Action"
+    }
+
+    for tf_label, (period, interval) in timeframes.items():
+        if is_crypto and tf_label != "Daily":
+            result[tf_label] = "⛔"  # cryptocompare n'offre que le daily
+            continue
+
+        df = get_crypto_data(ticker) if is_crypto else get_data_yfinance(ticker, period, interval)
+        if df is None:
+            result[tf_label] = "❌"
+        else:
+            result[tf_label] = "✅" if check_ma50_condition(df) else "❌"
+
+    return result
+
+with st.spinner("🔄 Chargement des données..."):
     results = []
 
     for ticker in TOP_50_ACTIONS:
-        res = process_ticker(ticker.strip(), is_crypto=False)
-        if res:
-            results.append(res)
+        results.append(process_ticker_multi_tf(ticker, is_crypto=False))
 
     for ticker in TOP_50_CRYPTOS:
-        res = process_ticker(ticker.strip(), is_crypto=True)
-        if res:
-            results.append(res)
+        results.append(process_ticker_multi_tf(ticker, is_crypto=True))
 
-if results:
-    df_results = pd.DataFrame(results)
-    df_actions = df_results[df_results["Type"] == "Action"]
-    df_cryptos = df_results[df_results["Type"] == "Crypto"]
+df_results = pd.DataFrame(results)
 
-    st.subheader("📈 Actions au-dessus de la MA50")
-    st.dataframe(df_actions[df_actions["Au-dessus MA50"] == "✅"], use_container_width=True)
+# Affichage
+st.subheader("📈 Résultats - Actions")
+st.dataframe(df_results[df_results["Type"] == "Action"], use_container_width=True)
 
-    st.subheader("💰 Cryptos au-dessus de la MA50")
-    st.dataframe(df_cryptos[df_cryptos["Au-dessus MA50"] == "✅"], use_container_width=True)
-else:
-    st.warning("Aucun résultat n'a pu être récupéré. Vérifie ta connexion ou réessaie plus tard.")
+st.subheader("💰 Résultats - Cryptos")
+st.dataframe(df_results[df_results["Type"] == "Crypto"], use_container_width=True)
+
+
 
