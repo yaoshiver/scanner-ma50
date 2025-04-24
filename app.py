@@ -1,13 +1,9 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import ta
 from ta.trend import EMAIndicator
 
-# ------------------------------
-# Configuration de l'app
-# ------------------------------
-st.set_page_config(page_title="Scanner Acheteur/Vendeur", layout="wide")
+st.set_page_config(page_title="Scanner Signal EMA", layout="wide")
 
 st.markdown("""
     <style>
@@ -17,17 +13,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Scanner LuxAlgo-Like : Signaux Acheteur/Vendeur (Daily)")
+st.title("Scanner Technique : Signal EMA façon LuxAlgo")
 
-# ------------------------------
-# Listes TOP 50 actions & cryptos (à adapter dynamiquement si besoin)
-# ------------------------------
-TOP50_STOCKS = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "BRK-B", "LLY", "JPM"]  # raccourci ici
-TOP50_CRYPTOS = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "DOT-USD", "LINK-USD"]
+# Top 50 actions et cryptos populaires (simplifiés ici pour l'exemple)
+TOP50_STOCKS = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD", "NFLX", "INTC"]
+TOP50_CRYPTOS = ["BTC-USD", "ETH-USD", "BNB-USD", "XRP-USD", "SOL-USD", "ADA-USD", "AVAX-USD", "DOGE-USD", "DOT-USD", "MATIC-USD"]
 
-# ------------------------------
-# Fonction de téléchargement des données
-# ------------------------------
 def get_data(ticker):
     try:
         df = yf.download(ticker, period="3mo", interval="1d")
@@ -36,57 +27,51 @@ def get_data(ticker):
     except:
         return None
 
-# ------------------------------
-# Fonction de signal type LuxAlgo (cross EMA 9 / 21)
-# ------------------------------
 def get_signal(df):
-    close = df["Close"].astype(float)
-    ema_fast = EMAIndicator(close=close, window=9).ema_indicator()
-    ema_slow = EMAIndicator(close=close, window=21).ema_indicator()
+    if df is None or df.empty or "Close" not in df.columns:
+        return "⛔"
 
-    df["EMA_fast"] = ema_fast
-    df["EMA_slow"] = ema_slow
+    df = df.copy()
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+    df.dropna(subset=["Close"], inplace=True)
 
-    if len(df) < 2 or df["EMA_fast"].isna().sum() > 0 or df["EMA_slow"].isna().sum() > 0:
-        return "❓ Données insuffisantes"
+    if len(df) < 30:
+        return "⛔"
 
-    last_fast = df["EMA_fast"].iloc[-1]
-    last_slow = df["EMA_slow"].iloc[-1]
-    prev_fast = df["EMA_fast"].iloc[-2]
-    prev_slow = df["EMA_slow"].iloc[-2]
+    try:
+        ema_fast = EMAIndicator(close=df["Close"], window=9).ema_indicator()
+        ema_slow = EMAIndicator(close=df["Close"], window=21).ema_indicator()
 
-    if prev_fast < prev_slow and last_fast > last_slow:
-        return "🟢 Signal Acheteur"
-    elif prev_fast > prev_slow and last_fast < last_slow:
-        return "🔴 Signal Vendeur"
-    else:
-        return "⚪️ Neutre"
+        df["EMA_fast"] = ema_fast
+        df["EMA_slow"] = ema_slow
 
-# ------------------------------
-# Affichage des résultats
-# ------------------------------
+        if df["EMA_fast"].isna().sum() > 0 or df["EMA_slow"].isna().sum() > 0:
+            return "⛔"
 
-def afficher_resultats(tickers, label):
-    st.subheader(label)
-    results = []
+        # Croisement haussier (achat)
+        if df["EMA_fast"].iloc[-2] < df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] > df["EMA_slow"].iloc[-1]:
+            return "🟢 Achat"
+        # Croisement baissier (vente)
+        elif df["EMA_fast"].iloc[-2] > df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] < df["EMA_slow"].iloc[-1]:
+            return "🔴 Vente"
+        else:
+            return "🟡 Neutre"
+    except Exception:
+        return "❌ Erreur"
+
+def afficher_resultats(tickers, titre_section):
+    st.subheader(titre_section)
+    resultats = []
     for ticker in tickers:
         df = get_data(ticker)
-        if df is not None:
-            signal = get_signal(df)
-            results.append({"Ticker": ticker, "Signal": signal})
+        signal = get_signal(df)
+        resultats.append({"Ticker": ticker, "Signal": signal})
 
-    df_results = pd.DataFrame(results)
-    st.dataframe(df_results, use_container_width=True)
+    st.dataframe(pd.DataFrame(resultats))
 
-# ------------------------------
-# Lancement
-# ------------------------------
-col1, col2 = st.columns(2)
-
-with col1:
+# Affichage des résultats
+with st.spinner("Analyse en cours..."):
     afficher_resultats(TOP50_STOCKS, "Top 50 Actions")
-
-with col2:
     afficher_resultats(TOP50_CRYPTOS, "Top 50 Cryptos")
 
 
