@@ -1,100 +1,91 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import ta
-import cryptocompare
-from datetime import datetime
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Scanner MA50 Multi-Timeframe", layout="wide")
+st.set_page_config(page_title="Scanner MA50 + MACD", layout="wide")
 
-st.title("📊 Scanner MA50 - 4H / Daily / Weekly")
+st.markdown("""
+    <style>
+        .main { background-color: #f7f9fa; }
+        h1, h2, h3 { color: #083759; }
+        .st-bw { background-color: white; padding: 1em; border-radius: 10px; box-shadow: 0px 2px 6px rgba(0,0,0,0.05); }
+    </style>
+""", unsafe_allow_html=True)
 
-# Top 50 actions
-TOP_50_ACTIONS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "BRK-B", "JPM", "JNJ",
-    "V", "PG", "UNH", "HD", "MA", "PFE", "ABBV", "XOM", "BAC", "DIS",
-    "KO", "PEP", "ADBE", "CSCO", "NFLX", "WMT", "INTC", "CRM", "T", "VZ",
-    "NKE", "ORCL", "MCD", "ABT", "CMCSA", "QCOM", "ACN", "LLY", "TMO", "DHR",
-    "AVGO", "COST", "TXN", "NEE", "UPS", "MS", "PM", "HON", "IBM", "UNP"
-]
-
-# Top 50 cryptos
-TOP_50_CRYPTOS = [
-    "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "TRX",
-    "LINK", "LTC", "MATIC", "XLM", "ATOM", "ETC", "FIL", "APT", "ARB", "IMX",
-    "NEAR", "HBAR", "INJ", "ICP", "RNDR", "SUI", "LDO", "EGLD", "GRT", "AAVE",
-    "FTM", "KAS", "MKR", "OP", "ALGO", "CHZ", "VET", "STX", "RPL", "DYDX",
-    "ZIL", "ENJ", "BCH", "XMR", "CRO", "SAND", "THETA", "AXS", "FLOW", "1INCH"
-]
+st.title("Scanner Technique : MA50 + MACD (Multi-timeframe)")
 
 @st.cache_data
-def get_yf_data(ticker, period, interval):
-    try:
-        df = yf.download(ticker, period=period, interval=interval, progress=False)
-        df.dropna(inplace=True)
-        return df
-    except:
-        return None
 
-@st.cache_data
-def get_crypto_daily(symbol):
-    try:
-        hist = cryptocompare.get_historical_price_day(symbol, currency='USD', limit=90)
-        df = pd.DataFrame(hist)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df.set_index("time", inplace=True)
-        df.rename(columns={"close": "Close"}, inplace=True)
-        df.dropna(inplace=True)
-        return df
-    except:
-        return None
+def get_stock_data(ticker, interval, period):
+    df = yf.download(ticker, interval=interval, period=period)
+    df.dropna(inplace=True)
+    return df
 
-def is_above_ma50(df):
-    try:
-        df["MA50"] = ta.trend.SMAIndicator(close=df["Close"], window=50).sma_indicator()
-        return df["Close"].iloc[-1] > df["MA50"].iloc[-1]
-    except:
+def check_conditions(df):
+    if "Close" not in df.columns or len(df) < 60:
+        return False
+    
+    df["MA50"] = ta.trend.sma_indicator(df["Close"], window=50)
+    macd = ta.trend.macd(df["Close"])
+    signal = ta.trend.macd_signal(df["Close"])
+
+    if macd.isna().sum() > 0 or signal.isna().sum() > 0:
         return False
 
-def analyze_ticker_ma50(ticker, is_crypto=False):
-    timeframes = {
-        "4H": ("7d", "1h"),     # approximatif pour voir MA50 4H (1h * 50)
-        "Daily": ("3mo", "1d"),
-        "Weekly": ("2y", "1wk")
-    }
+    is_above_ma = df["Close"].iloc[-1] > df["MA50"].iloc[-1]
+    macd_now, macd_prev = macd.iloc[-1], macd.iloc[-2]
+    signal_now, signal_prev = signal.iloc[-1], signal.iloc[-2]
 
-    result = {
-        "Ticker": ticker,
-        "Type": "Crypto" if is_crypto else "Action"
-    }
+    cross_up = macd_prev < signal_prev and macd_now > signal_now
+    is_positive_zone = macd_now > 0 and signal_now > 0
 
-    for tf, (period, interval) in timeframes.items():
-        if is_crypto and tf != "Daily":
-            result[tf] = "⛔"  # Cryptos seulement sur daily
-            continue
+    return is_above_ma and cross_up and is_positive_zone
 
-        df = get_crypto_daily(ticker) if is_crypto else get_yf_data(ticker, period, interval)
-        result[tf] = "✅" if df is not None and is_above_ma50(df) else "❌"
-
-    return result
-
-with st.spinner("🔄 Analyse en cours..."):
+def scan_tickers(tickers, label):
     results = []
+    for ticker in tickers:
+        try:
+            row = {"Ticker": ticker}
+            for tf_label, interval, period in [("4H", "1h", "7d"), ("Daily", "1d", "3mo"), ("Weekly", "1wk", "1y")]:
+                df = get_stock_data(ticker, interval=interval, period=period)
+                row[tf_label] = "✅" if check_conditions(df) else "❌"
+            results.append(row)
+        except:
+            continue
+    return pd.DataFrame(results)
 
-    for ticker in TOP_50_ACTIONS:
-        results.append(analyze_ticker_ma50(ticker, is_crypto=False))
+# Listes des 50 premières actions et cryptos populaires
+TOP_50_STOCKS = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "BRK-B", "JNJ", "V", "PG", "UNH", "JPM", "HD", "MA",
+    "XOM", "LLY", "ABBV", "PEP", "AVGO", "CVX", "MRK", "KO", "COST", "MCD", "WMT", "ADBE", "BAC", "PFE", "CRM", "TMO",
+    "NFLX", "ACN", "ABT", "TXN", "ORCL", "DHR", "NKE", "CMCSA", "QCOM", "INTC", "LIN", "AMD", "NEE", "MDT", "AMGN",
+    "BMY", "HON", "SBUX", "LOW"
+]
 
-    for ticker in TOP_50_CRYPTOS:
-        results.append(analyze_ticker_ma50(ticker, is_crypto=True))
+TOP_50_CRYPTOS = [
+    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "ADA-USD", "XRP-USD", "DOGE-USD", "AVAX-USD", "DOT-USD", "TRX-USD",
+    "LINK-USD", "MATIC-USD", "TON11419-USD", "SHIB-USD", "LTC-USD", "BCH-USD", "ICP-USD", "XLM-USD", "HBAR-USD",
+    "FIL-USD", "APT-USD", "ARB-USD", "NEAR-USD", "VET-USD", "INJ-USD", "QNT-USD", "EGLD-USD", "MKR-USD",
+    "AAVE-USD", "STX-USD", "SAND-USD", "XTZ-USD", "AXS-USD", "RUNE-USD", "FTM-USD", "LDO-USD", "SNX-USD",
+    "ZIL-USD", "ENJ-USD", "CRV-USD", "1INCH-USD", "CHZ-USD", "DYDX-USD", "COMP-USD", "GRT-USD", "FLOW-USD",
+    "IMX-USD", "BAT-USD", "OP-USD", "ALGO-USD"
+]
 
-df_results = pd.DataFrame(results)
+col1, col2 = st.columns(2)
 
-# Affichage
-st.subheader("📈 Actions - MA50")
-st.dataframe(df_results[df_results["Type"] == "Action"], use_container_width=True)
+with col1:
+    st.subheader("Top 50 Actions : MA50 + MACD")
+    stock_results = scan_tickers(TOP_50_STOCKS, "Actions")
+    st.dataframe(stock_results, use_container_width=True)
 
-st.subheader("💰 Cryptos - MA50")
-st.dataframe(df_results[df_results["Type"] == "Crypto"], use_container_width=True)
+with col2:
+    st.subheader("Top 50 Cryptos : MA50 + MACD")
+    crypto_results = scan_tickers(TOP_50_CRYPTOS, "Cryptos")
+    st.dataframe(crypto_results, use_container_width=True)
+
 
 
 
