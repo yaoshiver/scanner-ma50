@@ -2,82 +2,80 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import ta
+import datetime
 
-st.set_page_config(page_title="Signal Acheteur/Vendeur - Style LuxAlgo", layout="wide")
-st.title("Signal Acheteur/Vendeur - Style LuxAlgo (EMA 9/21)")
+st.set_page_config(page_title="Signal LuxAlgo Like", layout="wide")
 
-# Top 50 actions populaires (exemples)
+st.title("🔍 Scanner de Signaux Acheteur/Vendeur (Type LuxAlgo) - Journalier")
+
+# Exemple de Top 50 actions (à remplacer ou automatiser si besoin)
 TOP50_STOCKS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B", "UNH", "JNJ",
-    "V", "JPM", "PG", "MA", "HD", "XOM", "KO", "PEP", "LLY", "ABBV", "MRK", "AVGO",
-    "ORCL", "COST", "CVX", "TMO", "MCD", "ACN", "ABT", "QCOM", "TXN", "ADBE",
-    "NEE", "WMT", "DHR", "NKE", "CRM", "UPS", "INTC", "PM", "AMD", "LIN",
-    "MS", "UNP", "AMGN", "HON", "BA", "RTX", "LMT", "GS"
+    "XOM", "V", "PG", "JPM", "MA", "HD", "CVX", "ABBV", "AVGO", "LLY",
+    "KO", "PEP", "MRK", "BAC", "COST", "MCD", "TMO", "WMT", "NKE", "DIS",
+    "ADBE", "CRM", "CSCO", "ABT", "INTC", "DHR", "WFC", "ACN", "TXN", "VZ",
+    "LIN", "NEE", "PM", "QCOM", "BMY", "UPS", "MS", "RTX", "ORCL", "LOW"
 ]
 
-# Top 50 cryptos (exemples)
 TOP50_CRYPTOS = [
-    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
-    "DOT-USD", "TRX-USD", "LINK-USD", "MATIC-USD", "LTC-USD", "BCH-USD", "XLM-USD", "ATOM-USD",
-    "NEAR-USD", "HBAR-USD", "IMX-USD", "ETC-USD", "FIL-USD", "RNDR-USD", "ICP-USD", "INJ-USD",
-    "VET-USD", "MKR-USD", "GRT-USD", "SAND-USD", "EGLD-USD", "APE-USD", "AAVE-USD", "KAVA-USD",
-    "FLOW-USD", "XTZ-USD", "CHZ-USD", "THETA-USD", "AXS-USD", "ENS-USD", "ZEC-USD", "CAKE-USD",
-    "XMR-USD", "FTM-USD", "RUNE-USD", "LDO-USD", "CRV-USD", "1INCH-USD", "DYDX-USD", "COMP-USD",
-    "ZIL-USD", "BNT-USD"
+    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "AVAX-USD", "TRX-USD", "DOT-USD",
+    "LINK-USD", "MATIC-USD", "TON-USD", "LTC-USD", "SHIB-USD", "BCH-USD", "NEAR-USD", "ICP-USD", "ATOM-USD", "UNI-USD",
+    "XLM-USD", "ETC-USD", "HBAR-USD", "APT-USD", "FIL-USD", "IMX-USD", "ARB-USD", "VET-USD", "OP-USD", "MKR-USD",
+    "AAVE-USD", "SAND-USD", "EGLD-USD", "GRT-USD", "AXS-USD", "RUNE-USD", "INJ-USD", "XEC-USD", "STX-USD", "KAVA-USD",
+    "ZIL-USD", "ALGO-USD", "ENJ-USD", "CHZ-USD", "CRV-USD", "FTM-USD", "DYDX-USD", "CELO-USD", "FLOW-USD", "1INCH-USD"
 ]
 
-@st.cache_data(show_spinner=False)
+@st.cache_data
 def fetch_data(ticker):
-    df = yf.download(ticker, period="3mo", interval="1d")
-    if not df.empty and "Close" in df.columns:
-        df = df.dropna()
-        df = df.copy()
+    try:
+        df = yf.download(ticker, period="3mo", interval="1d")
+        if df.empty or "Close" not in df.columns:
+            return None
         df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-        df.dropna(subset=["Close"], inplace=True)
+        df.dropna(inplace=True)
         return df
-    return None
+    except Exception as e:
+        return None
 
 def get_signal(df):
-    if df is None or len(df) < 22:
-        return "N/A"
     try:
-        df["EMA_fast"] = ta.trend.ema_indicator(df["Close"], window=9)
-        df["EMA_slow"] = ta.trend.ema_indicator(df["Close"], window=21)
+        close = df["Close"]
+        ema_fast = ta.trend.ema_indicator(close=close, window=9).fillna(0)
+        ema_slow = ta.trend.ema_indicator(close=close, window=21).fillna(0)
 
-        if df["EMA_fast"].isna().sum() > 0 or df["EMA_slow"].isna().sum() > 0:
-            return "N/A"
+        df["EMA_fast"] = ema_fast
+        df["EMA_slow"] = ema_slow
 
-        fast_now = df["EMA_fast"].iloc[-1]
-        slow_now = df["EMA_slow"].iloc[-1]
-        fast_prev = df["EMA_fast"].iloc[-2]
-        slow_prev = df["EMA_slow"].iloc[-2]
+        if len(df) < 2:
+            return "⚠️ Données insuffisantes"
 
-        if fast_now > slow_now and fast_prev < slow_prev:
-            return "Signal Achat ✅"
-        elif fast_now < slow_now and fast_prev > slow_prev:
-            return "Signal Vente ❌"
+        if df["EMA_fast"].iloc[-2] < df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] > df["EMA_slow"].iloc[-1]:
+            return "🟢 Signal Acheteur"
+        elif df["EMA_fast"].iloc[-2] > df["EMA_slow"].iloc[-2] and df["EMA_fast"].iloc[-1] < df["EMA_slow"].iloc[-1]:
+            return "🔴 Signal Vendeur"
         else:
-            return "Neutre"
+            return "⚪️ Aucun Signal"
     except:
-        return "Erreur"
+        return "❌ Erreur"
 
-def afficher_signaux(tickers, label):
-    st.subheader(label)
-    data = []
+def afficher_signaux(tickers, titre):
+    st.subheader(titre)
+    resultats = []
     for ticker in tickers:
         df = fetch_data(ticker)
-        signal = get_signal(df)
-        data.append({"Ticker": ticker, "Signal": signal})
-    df_result = pd.DataFrame(data)
+        if df is None:
+            signal = "❌ Erreur données"
+        else:
+            signal = get_signal(df)
+        resultats.append({"Ticker": ticker, "Signal": signal})
+
+    df_result = pd.DataFrame(resultats)
     st.dataframe(df_result, use_container_width=True)
 
-# Affichage
-col1, col2 = st.columns(2)
-with col1:
-    afficher_signaux(TOP50_STOCKS, "Top 50 Actions")
+# Afficher les résultats
+afficher_signaux(TOP50_STOCKS, "📈 Top 50 Actions")
+afficher_signaux(TOP50_CRYPTOS, "💰 Top 50 Cryptos")
 
-with col2:
-    afficher_signaux(TOP50_CRYPTOS, "Top 50 Cryptos")
 
 
 
